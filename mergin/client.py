@@ -275,17 +275,43 @@ class MerginClient:
             detail = f"Namespace: {namespace}, project name: {project_name}"
             raise ClientError(str(e), detail)
 
-    def create_project_and_push(self, project_name, directory, is_public=False):
+    def create_project_and_push(self, project_name, directory, is_public=False, namespace=None):
         """
         Convenience method to create project and push the initial version right after that.
         """
-        self.create_project(project_name, is_public)
+        if not namespace:
+            namespace = self.username()
+        self.create_project(project_name, is_public, namespace=namespace)
         if directory:
             mp = MerginProject(directory)
-            full_project_name = "{}/{}".format(self.username(), project_name)
+            full_project_name = "{}/{}".format(namespace, project_name)
             mp.metadata = {"name": full_project_name, "version": "v0", "files": []}
             if mp.inspect_files():
                 self.push_project(directory)
+
+    def transfer_project(self, new_namespace, project_name, namespace=None):
+        if not self._user_info:
+            raise Exception("Authentication required")
+
+        params = {
+            "namespace": new_namespace
+        }
+        if not namespace:
+            namespace = self.username()
+        try:
+            self.post("/v1/project/transfer/%s/%s" % (namespace, project_name), params, {"Content-Type": "application/json"})
+        except Exception as e:
+            detail = f"Namespace: {namespace}, project name: {project_name}"
+            raise ClientError(str(e), detail)
+
+    def organizations_list(self):
+        if not self._user_info:
+            raise Exception("Authentication required")
+        try:
+            resp = self.get("/orgs/")
+            return json.load(resp)
+        except Exception as e:
+            raise ClientError(str(e))
 
     def projects_list(self, tags=None, user=None, flag=None, q=None):
         """
@@ -492,3 +518,22 @@ class MerginClient:
         params = {'path': file_path}
         resp = self.get("/v1/resource/changesets/{}/{}".format(project_path, version), params)
         return json.load(resp)
+
+    # Currently only for testing purposes #
+
+    def get_project_transfer_requests(self, project_name):
+        try:
+            resp = self.get("/v1/project/transfer/{}".format(project_name))
+            return json.load(resp)
+        except Exception as e:
+            raise ClientError(str(e))
+
+    def accept_transfer(self, transfer_id, new_namespace):
+        data = {
+                "namespace": new_namespace,
+                "transfer_permission": True
+        }
+        try:
+            self.post("/v1/project/transfer/{}".format(transfer_id), data, {"Content-Type": "application/json"})
+        except Exception as e:
+            raise ClientError(str(e))

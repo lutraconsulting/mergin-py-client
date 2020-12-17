@@ -108,6 +108,11 @@ class MerginProject:
         with open(self.fpath_meta('mergin.json'), 'w') as file:
             json.dump(data, file, indent=2)
 
+    def metadata_update_full_name(self, project_full_name):
+        mod_meta = self.metadata
+        mod_meta["name"] = project_full_name
+        self.metadata = mod_meta
+
     def is_versioned_file(self, file):
         """ Check if file is compatible with geodiff lib and hence suitable for versioning.
 

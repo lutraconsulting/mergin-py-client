@@ -13,6 +13,8 @@ API_USER = os.environ.get('TEST_API_USERNAME')
 USER_PWD = os.environ.get('TEST_API_PASSWORD')
 API_USER2 = os.environ.get('TEST_API_USERNAME2')
 USER_PWD2 = os.environ.get('TEST_API_PASSWORD2')
+ORGANIZATION = os.environ.get('TEST_ORGANIZATION')
+
 TMP_DIR = tempfile.gettempdir()
 TEST_DATA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'test_data')
 CHANGED_SCHEMA_DIR = os.path.join(os.path.dirname(os.path.realpath(__file__)), 'modified_schema')
@@ -622,15 +624,159 @@ def test_available_storage_validation2(mc, mc2):
     remove_folders([project_dir])
 
 
-def get_project_info(mc, namespace, project_name):
+def test_sync_within_organization(mc):
+    """
+    Test of creating user's project, transfering it to organization and pushing some data.
+    Strong precondition is that test organization exists and test user belongs to it.
+    """
+    test_project = 'test_sync_with_organization'
+    test_project_fullname = API_USER + '/' + test_project
+    project_full_name_org = ORGANIZATION + "/" + test_project
+
+    # cleanups
+    project_dir = os.path.join(TMP_DIR, test_project, API_USER)
+    cleanup(mc, test_project_fullname, [project_dir])
+    cleanup(mc, project_full_name_org, [project_dir])
+
+    # check if test organization exists ()
+    orgs = mc.organizations_list()
+    organization_list = [o for o in orgs if o['name'] == ORGANIZATION]
+    assert len(organization_list) == 1
+    assert organization_list[0]['storage'] > 0
+    assert API_USER in organization_list[0]['writers']
+
+    # create new (empty) project on server
+    mc.create_project(test_project, namespace=API_USER)
+
+    # transfer project to organization
+    mc.transfer_project(ORGANIZATION, test_project, API_USER)
+
+    # Accept transfer
+    transfers = mc.get_project_transfer_requests(ORGANIZATION)
+    assert transfers
+    for t in transfers:
+        if t['project']['name'] == test_project:
+            mc.accept_transfer(t['id'], ORGANIZATION)
+
+    transfers = mc.get_project_transfer_requests(ORGANIZATION)
+    assert len(transfers) == 0
+
+    # Check full name of project - expecting org_name as namespace
+    project_info = get_project_info(mc, ORGANIZATION, test_project, flag='shared')
+    assert project_info['name'] == test_project
+    assert project_info['namespace'] == ORGANIZATION
+
+    # download project
+    mc.download_project(project_full_name_org, project_dir)
+
+    # Push data
+    shutil.copy(os.path.join(TEST_DATA_DIR, 'base.gpkg'), os.path.join(project_dir, 'base.gpkg'))
+    mc.push_project(project_dir)
+
+    # check if project exists and contains any data
+    project_info = get_project_info(mc, ORGANIZATION, test_project, flag='shared')
+    assert project_info['meta']['files_count'] != 0
+    assert project_info['meta']['size'] != 0
+
+
+def test_sync_within_organization2(mc):
+    """
+    Similarly to `test_sync_within_organization`, testing of creating user's project, transferring it to organization
+    and pushing some data. Difference in workflow is when users download project first and transfer it afterwards.
+    Strong precondition is that test organization exists and test user belongs to it.
+    """
+    test_project = 'test_sync_with_organization2'
+    test_project_fullname = API_USER + '/' + test_project
+    project_full_name_org = ORGANIZATION + "/" + test_project
+
+    # cleanups
+    project_dir = os.path.join(TMP_DIR, test_project, API_USER)
+    cleanup(mc, test_project_fullname, [project_dir])
+    cleanup(mc, project_full_name_org, [project_dir])
+
+    # check if test organization exists ()
+    orgs = mc.organizations_list()
+    organization_list = [o for o in orgs if o['name'] == ORGANIZATION]
+    assert len(organization_list) == 1
+    assert organization_list[0]['storage'] > 0
+    assert API_USER in organization_list[0]['writers']
+
+    # create new (empty) project on server
+    mc.create_project(test_project, namespace=API_USER)
+
+    # download project
+    mc.download_project(test_project_fullname, project_dir)
+
+    # transfer project to organization
+    mc.transfer_project(ORGANIZATION, test_project, API_USER)
+
+    # Accept transfer
+    transfers = mc.get_project_transfer_requests(ORGANIZATION)
+    assert transfers
+    for t in transfers:
+        if t['project']['name'] == test_project:
+            mc.accept_transfer(t['id'], ORGANIZATION)
+
+    transfers = mc.get_project_transfer_requests(ORGANIZATION)
+    assert len(transfers) == 0
+
+    # Check full name of project - expecting org_name as namespace
+    project_info = get_project_info(mc, ORGANIZATION, test_project, flag='shared')
+    assert project_info['name'] == test_project
+    assert project_info['namespace'] == ORGANIZATION
+
+    # TODO An extra step after transfering project - currently client has to update metadata manually
+    # update metadata after transfer
+    mp = MerginProject(project_dir)
+    mp.metadata_update_full_name(project_full_name_org)
+
+    # check if local project's metadata are valid
+    mp = MerginProject(project_dir)
+    project_path = mp.metadata["name"]
+    assert project_path == project_full_name_org
+
+    # Push data
+    shutil.copy(os.path.join(TEST_DATA_DIR, 'base.gpkg'), os.path.join(project_dir, 'base.gpkg'))
+    mc.push_project(project_dir)
+
+    # check if project exists and contains any data
+    project_info = get_project_info(mc, ORGANIZATION, test_project, flag='shared')
+    assert project_info['meta']['files_count'] != 0
+    assert project_info['meta']['size'] != 0
+
+
+def test_create_org_project(mc):
+    test_project = 'test_create_org_project'
+    project_full_name_org = ORGANIZATION + "/" + test_project
+
+    # cleanups
+    project_dir = os.path.join(TMP_DIR, ORGANIZATION, test_project)
+    cleanup(mc, project_full_name_org, [os.path.join(TMP_DIR, ORGANIZATION)])
+
+    # prepare local project
+    os.mkdir(os.path.join(TMP_DIR, ORGANIZATION))
+    os.mkdir(project_dir)
+    shutil.copy(os.path.join(TEST_DATA_DIR, 'base.gpkg'), os.path.join(project_dir, 'base.gpkg'))
+
+    # create and push remote project
+    mc.create_project_and_push(test_project, namespace=ORGANIZATION, directory=project_dir)
+
+    # check if project exists and contains any data
+    project_info = get_project_info(mc, ORGANIZATION, test_project, flag='shared')
+    assert project_info['meta']['files_count'] != 0
+    assert project_info['meta']['size'] != 0
+
+
+def get_project_info(mc, namespace, project_name, flag='created'):
     """
     Returns first (and suppose to be just one) project info dict of project matching given namespace and name.
     :param mc: MerginClient instance
     :param namespace: project's namespace
     :param project_name: project's name
+    :param flag: filter flag according ownership
     :return: dict with project info
     """
-    projects = mc.projects_list(flag='created')
+    projects = mc.projects_list(flag=flag)
     test_project_list = [p for p in projects if p['name'] == project_name and p['namespace'] == namespace]
     assert len(test_project_list) == 1
     return test_project_list[0]

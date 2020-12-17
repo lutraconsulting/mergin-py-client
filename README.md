@@ -120,4 +120,5 @@ For running test do:
     export TEST_API_PASSWORD=<pwd>
     export TEST_API_USERNAME2=<username2>
     export TEST_API_PASSWORD2=<pwd2>
+    export TEST_ORGANIZATION=<organization_name>
     pipenv run pytest --cov-report html --cov=mergin test/
